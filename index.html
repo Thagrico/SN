@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plantation Quality Map</title>
+<style>
+html,body{margin:0;padding:0;height:100%;font-family:Arial,'Helvetica Neue',sans-serif;background:#eef2f3}
+#map{width:100%;height:100vh;background:#dfe7e9}
+#status{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:99999;max-width:min(92vw,760px);padding:9px 14px;border-radius:8px;background:rgba(255,255,255,.96);box-shadow:0 2px 12px rgba(0,0,0,.22);font-size:13px;color:#333;text-align:center}
+#status.ok{display:none}
+#plot-info{
+ position:fixed;
+ right:10px;
+ top:10px;
+ z-index:10000;
+ width:min(370px,calc(100vw - 20px));
+ max-height:calc(100vh - 20px);
+ overflow:auto;
+ background:#fff;
+ border:1px solid #d7d7d7;
+ border-radius:12px;
+ box-shadow:0 10px 30px rgba(0,0,0,.24);
+ display:none
+}
+#plot-info .head{
+ position:sticky;
+ background:linear-gradient(180deg,#fffdf7,#f2e6c7);
+ top:0;
+ z-index:2;
+ padding:13px 44px 12px 14px;
+ font-size:16px;
+ font-weight:700;
+ color:#5d4300;
+ letter-spacing:.2px;
+ border-bottom:1px solid #d9c99e
+}
+#plot-info .close{
+ position:absolute;
+ right:7px;
+ top:6px;
+ border:0;
+ background:#fff;
+ color:#6a4b00;
+ box-shadow:0 1px 5px rgba(0,0,0,.18);
+ border-radius:50%;
+ width:28px;
+ height:28px;
+ font-size:20px;
+ line-height:26px;
+ cursor:pointer
+}
+#plot-info .body{padding:0}
+#plot-info .popup-table td:first-child{width:48%}
+#status.warn{background:#fff7dc;color:#704b00}
+#status.error{background:#ffe8e8;color:#8b0000}
+.popup-table{
+ border-collapse:collapse;
+ width:100%;
+ table-layout:fixed;
+ background:#fff
+}
+.popup-table td{
+ border:0;
+ border-bottom:1px solid #e7dfcc;
+ padding:10px 11px;
+ font-size:14px;
+ line-height:1.35;
+ vertical-align:top;
+ color:#222;
+ overflow-wrap:anywhere;
+ word-break:normal
+}
+.popup-table td:first-child{
+ font-weight:600;
+ background:#fbf7ec;
+ color:#604700;
+ text-transform:none
+}
+.popup-table td:last-child{
+ font-weight:500;
+ background:#fff;
+ color:#1f2933
+}
+.legend{background:white;padding:10px;border-radius:8px;box-shadow:0 0 8px rgba(0,0,0,.25);line-height:22px;font-size:13px}
+.leaflet-interactive{transition:none}
+.xn-label{color:#8B0000;font-size:20px;font-weight:700;text-shadow:1px 1px 2px white,-1px -1px 2px white,1px -1px 2px white,-1px 1px 2px white}
+.thua-label{color:#000;font-size:12px;font-weight:700;white-space:nowrap;text-shadow:1px 1px 2px #fff,-1px -1px 2px #fff,1px -1px 2px #fff,-1px 1px 2px #fff}
+.lo-label{width:22px;height:22px;line-height:22px;text-align:center;background:rgba(255,255,255,.85);border:1.5px solid #036;border-radius:50%;color:#036;font-size:11px;font-weight:700;box-sizing:border-box}
+
+.clean-plot-popup .leaflet-popup-content-wrapper{
+ padding:0;
+ border-radius:12px;
+ overflow:hidden;
+ box-shadow:0 4px 18px rgba(0,0,0,.22)
+}
+.clean-plot-popup .leaflet-popup-content{
+ margin:0;
+ width:360px !important;
+ max-width:calc(100vw - 54px);
+ max-height:60vh;
+ overflow:auto
+}
+.clean-plot-popup .leaflet-popup-close-button{
+ width:28px !important;
+ height:28px !important;
+ line-height:26px !important;
+ font-size:20px !important;
+ color:#444 !important;
+ background:rgba(255,255,255,.92) !important;
+ border-radius:50%;
+ right:5px !important;
+ top:5px !important;
+ z-index:3
+}
+.map-popup-table-wrap{padding:0}
+@media (max-width:600px){
+ #plot-info{
+  right:6px;
+  top:6px;
+  width:min(340px,calc(100vw - 12px));
+  max-height:calc(100vh - 12px)
+ }
+ #plot-info .head{font-size:14px}
+ .popup-table td{font-size:13px;padding:8px 7px}
+ .clean-plot-popup .leaflet-popup-content{width:320px !important}
+}
+
+</style>
+</head>
+<body>
+<div id="status">Đang khởi tạo bản đồ…</div>
+<div id="map"></div>
+<div id="plot-info"><div class="head">THÔNG TIN THỬA<button class="close" type="button" aria-label="Đóng">×</button></div><div class="body"></div></div>
+<script>
+(function(){
+'use strict';
+const statusBox=document.getElementById('status');
+function status(msg,type=''){statusBox.textContent=msg;statusBox.className=type}
+function loadCss(url){return new Promise((resolve,reject)=>{const l=document.createElement('link');l.rel='stylesheet';l.href=url;l.onload=resolve;l.onerror=reject;document.head.appendChild(l)})}
+function loadScript(url,timeout=8000){return new Promise((resolve,reject)=>{const s=document.createElement('script');let done=false;const t=setTimeout(()=>{if(!done){done=true;s.remove();reject(new Error('Timeout '+url))}},timeout);s.src=url;s.onload=()=>{if(!done){done=true;clearTimeout(t);resolve()}};s.onerror=()=>{if(!done){done=true;clearTimeout(t);reject(new Error('Không tải được '+url))}};document.head.appendChild(s)})}
+async function loadLeaflet(){
+ const cssUrls=['https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css','https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'];
+ const jsUrls=['https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'];
+ for(const u of cssUrls){try{await loadCss(u);break}catch(e){}}
+ for(const u of jsUrls){try{await loadScript(u);if(window.L)return}catch(e){}}
+ throw new Error('Không tải được thư viện Leaflet. Hãy kiểm tra kết nối mạng.');
+}
+function fetchJson(url,timeout=8000){
+ return new Promise((resolve,reject)=>{const c=new AbortController();const t=setTimeout(()=>c.abort(),timeout);fetch(url,{cache:'no-store',signal:c.signal}).then(r=>{if(!r.ok)throw new Error(r.status+' '+r.statusText);return r.json()}).then(v=>{clearTimeout(t);resolve(v)}).catch(e=>{clearTimeout(t);reject(e)})})
+}
+async function fetchFirst(candidates){
+ let last;
+ for(const name of candidates){try{return {data:await fetchJson(name),name}}catch(e){last=e}}
+ throw new Error(candidates[0]+': '+(last?.message||'không tìm thấy'));
+}
+function escapeHtml(v){return String(v).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[c]))}
+function stripAccents(v){return String(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim()}
+function sentenceCase(v){const s=String(v).trim().replace(/[_-]+/g,' ').replace(/\s+/g,' ');if(!s)return '';if(/^dp3$/i.test(s))return 'DP3';return s.charAt(0).toUpperCase()+s.slice(1).toLowerCase()}
+function formatFieldName(key){
+ const raw=String(key).trim();
+ const base=raw.replace(/\s*\([^)]*\)\s*/g,' ').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();
+ const n=stripAccents(base);
+ const names={
+  'thua':'Thửa (Plot)','plot':'Thửa (Plot)','lo':'Lô (Block)','block':'Lô (Block)',
+  'chat luong vuon':'Chất lượng vườn (Plantation quality)','plantation quality':'Chất lượng vườn (Plantation quality)',
+  'he':'Hệ (System)','he thong':'Hệ thống (System)','he thong tuoi':'Hệ thống tưới (Irrigation system)',
+  'do day':'Độ dày (Density)','mat do':'Mật độ (Density)','giong':'Giống (Variety)',
+  'thang':'Tháng (Month)','thang trong':'Tháng trồng (Planting month)','nam trong':'Năm trồng (Planting year)',
+  'ngap':'Ngập (Flooding)','muc do ngap':'Mức độ ngập (Flooding level)','dien tich':'Diện tích (Area)',
+  'tinh trang':'Tình trạng (Status)','ghi chu':'Ghi chú (Notes)','ten':'Tên (Name)','name':'Tên (Name)'
+ };
+ if(names[n])return names[n];
+ if(/\([^)]*[A-Za-z][^)]*\)/.test(raw))return raw.replace(/^[A-ZÀ-Ỹ0-9 _-]+(?=\s*\()/,m=>sentenceCase(m));
+ if(n==='dp3') return 'DP3';
+ return sentenceCase(base);
+}
+function monthEnglish(num){return ['','January','February','March','April','May','June','July','August','September','October','November','December'][num]||''}
+function formatValue(value,key=''){
+ if(value===null||typeof value==='undefined')return '';
+ if(typeof value==='number')return String(value);
+ let raw=String(value).trim();if(!raw)return '';
+ if(/^dp3$/i.test(raw))return 'DP3';
+ const n=stripAccents(raw),kn=stripAccents(key);
+ const m=n.match(/^(?:thang\s*)?(1[0-2]|[1-9])$/);
+ if((kn.includes('thang')||n.startsWith('thang '))&&m){const num=Number(m[1]);return `tháng ${num} (${monthEnglish(num)})`}
+ const exact={
+  'tot':'tốt (Good)','good':'tốt (Good)','trung binh':'trung bình (Fair)','tb':'trung bình (Fair)','fair':'trung bình (Fair)',
+  'kem':'kém (Poor)','poor':'kém (Poor)','trong moi':'trồng mới (New plantation)','tm':'trồng mới (New plantation)','new':'trồng mới (New plantation)',
+  'ngap tb':'ngập trung bình (Fair)','ngap trung binh':'ngập trung bình (Fair)','ngap nhe':'ngập nhẹ (Mild)','ngap nang':'ngập nặng (Severe)','khong ngap':'không ngập (No flooding)',
+  'cao':'cao (High)','thap':'thấp (Low)','co':'có (Yes)','khong':'không (No)','yes':'có (Yes)','no':'không (No)',
+  'dang sx':'đang sản xuất (In production)','dang san xuat':'đang sản xuất (In production)','nghi':'ngừng sản xuất (Inactive)','inactive':'ngừng sản xuất (Inactive)',
+  'cay mo':'cấy mô (Tissue culture)','giong cay mo':'giống cấy mô (Tissue culture)','choi':'chồi (Sucker)','giong choi':'giống chồi (Sucker)',
+  'nho giot':'nhỏ giọt (Drip irrigation)','phun mua':'phun mưa (Sprinkler irrigation)','tuoi tran':'tưới tràn (Flood irrigation)','khong tuoi':'không tưới (No irrigation)'
+ };
+ if(exact[n])return exact[n];
+ if(/^thang\s+(1[0-2]|[1-9])$/.test(n)){const num=Number(n.match(/(1[0-2]|[1-9])/)[1]);return `tháng ${num} (${monthEnglish(num)})`}
+ if(/^[A-ZÀ-Ỹ0-9 /._-]+$/.test(raw)&&/[A-ZÀ-Ỹ]/.test(raw))raw=raw.toLowerCase();
+ return raw;
+}
+function collectProperties(feature){
+ const out={};
+ function addObject(obj,prefix=''){
+  if(!obj||typeof obj!=='object'||Array.isArray(obj))return;
+  Object.entries(obj).forEach(([k,v])=>{
+   if(['type','geometry','bbox'].includes(k))return;
+   const key=prefix?prefix+' / '+k:k;
+   if(v&&typeof v==='object'&&!Array.isArray(v))addObject(v,key);
+   else out[key]=Array.isArray(v)?v.join(', '):v;
+  });
+ }
+ addObject(feature&&feature.properties);
+ if(!Object.keys(out).length)addObject(feature&&feature.attributes);
+ if(!Object.keys(out).length)addObject(feature);
+ return out;
+}
+function createPopup(feature){const properties=collectProperties(feature);const entries=Object.entries(properties).filter(([,v])=>v!==null&&v!==''&&typeof v!=='undefined');if(!entries.length)return '<div style="padding:8px">Thửa này không có dữ liệu thuộc tính.</div>';let html='<table class="popup-table">';entries.forEach(([k,v])=>{html+=`<tr><td><b>${escapeHtml(formatFieldName(k))}</b></td><td>${escapeHtml(formatValue(v,k))}</td></tr>`});return html+'</table>'}
+function showPlotInfo(feature){const box=document.getElementById('plot-info');box.querySelector('.body').innerHTML=createPopup(feature);box.style.display='block'}
+document.querySelector('#plot-info .close').addEventListener('click',()=>document.getElementById('plot-info').style.display='none');
+function getQualityColor(feature){const p=feature.properties||{};const q=String(p['Chất lượng vườn (Plantation Quality)']||p['Plantation Quality']||p['CHAT_LUONG_VUON']||p['CL_VUON']||'').toLowerCase();if(q.includes('tốt')||q.includes('tot')||q.includes('good'))return '#2E7D32';if(q.includes('trung bình')||q.includes('trung binh')||q.includes('fair')||q==='tb')return '#7CB342';if(q.includes('kém')||q.includes('kem')||q.includes('poor'))return '#D8F0C8';if(q.includes('trồng mới')||q.includes('trong moi')||q.includes('new')||q==='tm')return '#B59B3A';return '#D9D9D9'}
+async function init(){
+ try{await loadLeaflet()}catch(e){status(e.message,'error');return}
+ const map=L.map('map',{fadeAnimation:false,zoomAnimation:false,markerZoomAnimation:false,preferCanvas:true}).setView([11,106],7);
+ [['polygonPane',400],['linePane',500],['ranhPane',600],['labelPane',650]].forEach(([n,z])=>{map.createPane(n);map.getPane(n).style.zIndex=z});map.getPane('linePane').style.pointerEvents='none';map.getPane('ranhPane').style.pointerEvents='none';map.getPane('labelPane').style.pointerEvents='none';map.getPane('polygonPane').style.pointerEvents='auto';map.getPane('popupPane').style.zIndex=7000;
+ const tiles=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',updateWhenIdle:true,keepBuffer:1,maxZoom:19}).addTo(map);
+ tiles.on('tileerror',()=>{});
+ const legend=L.control({position:'bottomright'});legend.onAdd=()=>{const d=L.DomUtil.create('div','legend');d.innerHTML='<span style="display:inline-block;width:14px;height:14px;background:#2E7D32;border:1px solid #666"></span> Tốt <span style="font-size:11px;color:#666">(Good)</span><br><span style="display:inline-block;width:14px;height:14px;background:#7CB342;border:1px solid #666"></span> Trung bình <span style="font-size:11px;color:#666">(Fair)</span><br><span style="display:inline-block;width:14px;height:14px;background:#D8F0C8;border:1px solid #666"></span> Kém <span style="font-size:11px;color:#666">(Poor)</span><br><span style="display:inline-block;width:14px;height:14px;background:#B59B3A;border:1px solid #666"></span> Trồng mới <span style="font-size:11px;color:#666">(New)</span><br><span style="display:inline-block;width:14px;height:14px;background:#D9D9D9;border:1px solid #666"></span> <span style="font-size:11px;color:#666">No Data</span>';return d};legend.addTo(map);
+ const jobs=[
+  ['Thửa',['Thua.geojson','thua.geojson','Thua(8).geojson','thua(8).geojson']],
+  ['Đường lô',['Line_lo.geojson','line_lo.geojson','Line_lo(8).geojson']],
+  ['Ranh xí nghiệp',['Ranh_xn.geojson','ranh_xn.geojson','Ranh_xn(8).geojson']],
+  ['Tên xí nghiệp',['Ten_xn.geojson','ten_xn.geojson','Ten_xn(8).geojson']],
+  ['Số lô',['Text_lo.geojson','text_lo.geojson','Text_lo(8).geojson']]
+ ];
+ status('Đang tải dữ liệu bản đồ…');
+ const results=await Promise.allSettled(jobs.map(j=>fetchFirst(j[1])));
+ const errors=[];
+ results.forEach((r,i)=>{if(r.status==='rejected')errors.push(jobs[i][0])});
+ if(results[0].status==='fulfilled'){
+  const data=results[0].value.data;
+  const layer=L.geoJSON(data,{pane:'polygonPane',style:f=>({color:'#fff',weight:1.2,opacity:1,fillColor:getQualityColor(f),fillOpacity:.93,lineJoin:'round',lineCap:'round'}),onEachFeature:(f,l)=>{l.bindPopup(()=>'<div class="map-popup-table-wrap">'+createPopup(f)+'</div>',{maxWidth:360,maxHeight:460,autoPan:true,className:'clean-plot-popup'});l.on('click',e=>{L.DomEvent.stopPropagation(e);showPlotInfo(f);l.openPopup(e.latlng)});const b=l.getBounds();if(b.isValid()){const nw=b.getNorthWest();L.marker(L.latLng(nw.lat-.00005,nw.lng+.00005),{pane:'labelPane',interactive:false,icon:L.divIcon({className:'thua-label',html:(f.properties&&f.properties['Thửa (Plot)'])||'',iconSize:null})}).addTo(map)}}}).addTo(map);if(layer.getBounds().isValid())map.fitBounds(layer.getBounds(),{padding:[10,10]});
+ }
+ if(results[1].status==='fulfilled'){const d=results[1].value.data;L.geoJSON(d,{pane:'linePane',interactive:false,style:{color:'#fff',weight:4,opacity:1}}).addTo(map);L.geoJSON(d,{pane:'linePane',interactive:false,style:{color:'#29B6F6',weight:2,opacity:1}}).addTo(map)}
+ if(results[2].status==='fulfilled')L.geoJSON(results[2].value.data,{pane:'ranhPane',interactive:false,style:{color:'#8B0000',weight:5,opacity:1,fill:false}}).addTo(map);
+ if(results[3].status==='fulfilled')L.geoJSON(results[3].value.data,{pointToLayer:(f,ll)=>L.marker(ll,{pane:'labelPane',interactive:false,icon:L.divIcon({className:'xn-label',html:(f.properties&&f.properties.Name)||'',iconSize:[120,30]})})}).addTo(map);
+ if(results[4].status==='fulfilled')L.geoJSON(results[4].value.data,{pointToLayer:(f,ll)=>L.marker(ll,{pane:'labelPane',interactive:false,icon:L.divIcon({className:'lo-label',html:(f.properties&&f.properties.Name)||'',iconSize:[22,22]})})}).addTo(map);
+ if(errors.length)status('Bản đồ đã mở. Chưa tải được: '+errors.join(', ')+'. Kiểm tra tên file GeoJSON đặt cùng thư mục HTML.','warn');else status('', 'ok');
+ setTimeout(()=>map.invalidateSize(),100);
+}
+init().catch(e=>status('Lỗi: '+e.message,'error'));
+})();
+</script>
+</body>
+</html>
